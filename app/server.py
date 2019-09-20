@@ -16,9 +16,6 @@ def get_next_id():
         next_id = 1
     return next_id
 
-def modify_event(event, data):
-    pass
-
 def remove_event(event):
     stored_events.remove(event)
 
@@ -71,7 +68,7 @@ def create_event():
     if not (description := data.get('description', None)) \
         or len(description) > 1000:
         abort(400)
-    if not (organizer := data.get('organizer', None)) or len(organizer) > 100:
+    if (organizer := data.get('organizer', None)) and len(organizer) > 100:
         abort(400)
     if not (datetime_of_event := data.get('datetime_of_event', None)) \
         or not datetime.strptime(datetime_of_event, '%Y-%m-%d %H:%M:%S'):
