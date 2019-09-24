@@ -2,12 +2,16 @@
 Server Module
 """
 from flask import Flask, Blueprint, request, jsonify, abort
+from marshmallow import Schema, fields, validates, ValidationError
+from marshmallow.validate import Length
 
 from datetime import datetime
+from dateutil.relativedelta import relativedelta
 
 app = Flask(__name__)
 
 stored_events = []
+
 
 def get_next_id():
     if stored_events:
@@ -16,8 +20,10 @@ def get_next_id():
         next_id = 1
     return next_id
 
+
 def remove_event(event):
     stored_events.remove(event)
+
 
 def get_stored_event(event_id):
     event = [event for event in stored_events if event.id == event_id]
@@ -25,6 +31,7 @@ def get_stored_event(event_id):
         return event[0]
     else:
         return None
+
 
 class Event:
 
@@ -44,12 +51,45 @@ class Event:
             datetime_of_event=self.datetime_of_event
         )
 
+
+class BaseSchema(Schema):
+    @validates("datetime_of_event")
+    def validate_date(self, date):
+        if date > datetime.now() + relativedelta(years=1):
+            raise ValidationError(
+                "The event can not be organized more than one year in advance."
+                )
+        if date < datetime.now():
+            raise ValidationError(
+                "You can not organize an event in a passed day"
+            )
+
+    class Meta:
+        dateformat = '%Y-%m-%d %H:%M:%S'
+
+
+class CreateEventSchema(BaseSchema):
+    name = fields.Str(required=True, validate=Length(max=100))
+    description = fields.Str(required=True, validate=Length(max=1000))
+    organizer = fields.Str(required=False, validate=Length(max=100))
+    datetime_of_event = fields.DateTime(required=True)
+
+
+class UpdateEventSchema(BaseSchema):
+    name = fields.Str(required=False, validate=Length(max=100))
+    description = fields.Str(required=False, validate=Length(max=1000))
+    organizer = fields.Str(required=False, validate=Length(max=100))
+    datetime_of_event = fields.DateTime(required=False)
+
+
 events = Blueprint('events', __name__, url_prefix='/api/events')
+
 
 @events.route('/', methods=['GET'])
 def get_all_events():
     all_events = [event.__str__() for event in stored_events]
     return jsonify(all_events), 200
+
 
 @events.route('/<int:event_id>', methods=['GET'])
 def get_event(event_id):
@@ -60,24 +100,19 @@ def get_event(event_id):
         response = jsonify('Event not found'), 404
     return response
 
+
 @events.route('', methods=['POST'])
 def create_event():
     data = request.get_json()
-    if not (name := data.get('name', None)) or len(name) > 100:
-        abort(400)
-    if not (description := data.get('description', None)) \
-        or len(description) > 1000:
-        abort(400)
-    if (organizer := data.get('organizer', None)) and len(organizer) > 100:
-        abort(400)
-    if not (datetime_of_event := data.get('datetime_of_event', None)) \
-        or not datetime.strptime(datetime_of_event, '%Y-%m-%d %H:%M:%S'):
-        abort(400)
+    event_schema = CreateEventSchema()
+    errors = event_schema.validate(data)
+    if errors:
+        return jsonify(errors), 400
     event = Event(
-        name,
-        description,
-        organizer,
-        datetime_of_event
+        data['name'],
+        data['description'],
+        data.get('organizer', None),
+        data['datetime_of_event']
         )
     stored_events.append(event)
     return jsonify(event.__str__()), 201
@@ -86,28 +121,20 @@ def create_event():
 @events.route('/<int:event_id>', methods=['PUT'])
 def update_event(event_id):
     data = request.get_json()
+    event_schema = UpdateEventSchema()
+    errors = event_schema.validate(data)
+    if errors:
+        return jsonify(errors), 400
     event = get_stored_event(event_id)
     if event:
         if (name:= data.get('name', None)):
-            if len(name) < 100:
-                event.name = name
-            else:
-                abort(400)
+            event.name = name
         if (description:= data.get('description', None)):
-            if len(description) < 1000:
-                event.description = description
-            else:
-                abort(400)
+            event.description = description
         if (organizer:= data.get('organizer', None)):
-            if len(organizer) < 100:
-                event.organizer = organizer
-            else:
-                abort(400)
+            event.organizer = organizer
         if (datetime_of_event:= data.get('datetime_of_event', None)):
-            if datetime.strptime(datetime_of_event, '%Y-%m-%d %H:%M:%S'):
-                event.datetime_of_event = datetime_of_event
-            else:
-                abort(400)
+            event.datetime_of_event = datetime_of_event
         response = jsonify(event.__str__()), 200
     else:
         response = jsonify('Event not found'), 404
@@ -123,6 +150,7 @@ def delete_event(event_id):
     else:
         response = jsonify('Event not found'), 404
     return response
+
 
 app.register_blueprint(events)
 
